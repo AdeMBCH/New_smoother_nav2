@@ -1,0 +1,7 @@
+<library path="nav2_se2_hybrid_smoother">
+  <class
+    type="nav2_se2_hybrid_smoother::SE2HybridSmoother"
+    base_class_type="nav2_core::Smoother">
+    <description>Hybrid Euclidean + local SE(2)-aware smoother for Nav2.</description>
+  </class>
+</library>

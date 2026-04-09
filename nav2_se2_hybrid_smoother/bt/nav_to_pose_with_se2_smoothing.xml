@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<root main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <RecoveryNode number_of_retries="1" name="NavigateRecovery">
+      <PipelineSequence name="NavigateWithSmoothing">
+        <ComputePathToPose goal="{goal}" path="{raw_path}" planner_id="GridBased"/>
+        <SmoothPath unsmoothed_path="{raw_path}" smoothed_path="{path}" smoother_id="se2_hybrid"/>
+        <FollowPath path="{path}" controller_id="FollowPath"/>
+      </PipelineSequence>
+      <ClearEntireCostmap name="ClearGlobalCostmap-Context" service_name="clear_entirely_global_costmap"/>
+    </RecoveryNode>
+  </BehaviorTree>
+</root>
