@@ -12,6 +12,7 @@ def generate_launch_description():
     params_file = LaunchConfiguration('params_file')
     bt_xml_file = LaunchConfiguration('bt_xml_file')
     use_sim_time = LaunchConfiguration('use_sim_time')
+    headless = LaunchConfiguration('headless')
 
     return LaunchDescription([
         DeclareLaunchArgument(
@@ -23,6 +24,7 @@ def generate_launch_description():
             default_value=PathJoinSubstitution([pkg_share, 'bt', 'nav_to_pose_with_se2_smoothing.xml'])
         ),
         DeclareLaunchArgument('use_sim_time', default_value='True'),
+        DeclareLaunchArgument('headless', default_value='False'),
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
                 PathJoinSubstitution([nav2_bringup_share, 'launch', 'tb3_simulation_launch.py'])
@@ -31,6 +33,7 @@ def generate_launch_description():
                 'params_file': params_file,
                 'bt_xml_file': bt_xml_file,
                 'use_sim_time': use_sim_time,
+                'headless': headless,
             }.items()
         )
     ])

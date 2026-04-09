@@ -6,15 +6,17 @@ if(NOT CMAKE_CXX_STANDARD)
 endif()
 
 find_package(ament_cmake REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(nav2_core REQUIRED)
+find_package(nav2_costmap_2d REQUIRED)
+find_package(nav2_util REQUIRED)
+find_package(nav_msgs REQUIRED)
+find_package(pluginlib REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
-find_package(nav2_core REQUIRED)
-find_package(nav2_util REQUIRED)
-find_package(pluginlib REQUIRED)
-find_package(nav_msgs REQUIRED)
-find_package(geometry_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
+find_package(tf2_ros REQUIRED)
 
 add_library(${PROJECT_NAME} SHARED
   src/se2_hybrid_smoother.cpp
@@ -27,15 +29,17 @@ target_include_directories(${PROJECT_NAME}
 )
 
 ament_target_dependencies(${PROJECT_NAME}
+  geometry_msgs
+  nav2_core
+  nav2_costmap_2d
+  nav2_util
+  nav_msgs
+  pluginlib
   rclcpp
   rclcpp_lifecycle
-  nav2_core
-  nav2_util
-  pluginlib
-  nav_msgs
-  geometry_msgs
   tf2
   tf2_geometry_msgs
+  tf2_ros
 )
 
 pluginlib_export_plugin_description_file(nav2_core plugin.xml)
@@ -54,7 +58,7 @@ install(FILES plugin.xml
   DESTINATION share/${PROJECT_NAME}
 )
 
-install(DIRECTORY config bt launch scripts
+install(DIRECTORY config bt launch
   DESTINATION share/${PROJECT_NAME}
 )
 

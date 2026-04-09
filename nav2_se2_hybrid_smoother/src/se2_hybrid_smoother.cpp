@@ -3,7 +3,8 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
-#include <limits>
+#include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -26,8 +27,15 @@ void declareIfNotDeclared(
     node->declare_parameter(parameter_name, default_value);
   }
 }
-}  // namespace
 
+geometry_msgs::msg::Quaternion yawToQuaternion(const double yaw)
+{
+  tf2::Quaternion q;
+  q.setRPY(0.0, 0.0, yaw);
+  q.normalize();
+  return tf2::toMsg(q);
+}
+}  // namespace
 
 double SE2HybridSmoother::wrapAngle(double a)
 {
@@ -65,15 +73,13 @@ void SE2HybridSmoother::removeDuplicatePoses(nav_msgs::msg::Path & path, double 
   filtered.poses.reserve(path.poses.size());
   filtered.poses.push_back(path.poses.front());
 
-  auto sq_dist = [](const auto & a, const auto & b) {
-      const double dx = a.pose.position.x - b.pose.position.x;
-      const double dy = a.pose.position.y - b.pose.position.y;
-      return dx * dx + dy * dy;
-    };
-
   const double eps2 = eps * eps;
   for (size_t i = 1; i < path.poses.size(); ++i) {
-    if (sq_dist(path.poses[i], filtered.poses.back()) > eps2) {
+    const auto & c = path.poses[i].pose.position;
+    const auto & p = filtered.poses.back().pose.position;
+    const double dx = c.x - p.x;
+    const double dy = c.y - p.y;
+    if (dx * dx + dy * dy > eps2) {
       filtered.poses.push_back(path.poses[i]);
     }
   }
@@ -81,6 +87,7 @@ void SE2HybridSmoother::removeDuplicatePoses(nav_msgs::msg::Path & path, double 
   if (filtered.poses.size() == 1) {
     filtered.poses.push_back(path.poses.back());
   }
+
   path = std::move(filtered);
 }
 
@@ -111,6 +118,7 @@ void SE2HybridSmoother::configure(
   declareIfNotDeclared(node, name_ + ".w_curvature_var", 0.05);
   declareIfNotDeclared(node, name_ + ".preserve_start_orientation", true);
   declareIfNotDeclared(node, name_ + ".preserve_goal_orientation", true);
+  declareIfNotDeclared(node, name_ + ".publish_debug_paths", true);
   declareIfNotDeclared(node, name_ + ".convergence_tol", 1e-4);
 
   node->get_parameter(name_ + ".resample_distance", resample_distance_);
@@ -123,27 +131,45 @@ void SE2HybridSmoother::configure(
   node->get_parameter(name_ + ".w_curvature_var", w_curvature_var_);
   node->get_parameter(name_ + ".preserve_start_orientation", preserve_start_orientation_);
   node->get_parameter(name_ + ".preserve_goal_orientation", preserve_goal_orientation_);
+  node->get_parameter(name_ + ".publish_debug_paths", publish_debug_paths_);
   node->get_parameter(name_ + ".convergence_tol", convergence_tol_);
 
   resample_distance_ = std::max(0.01, resample_distance_);
   max_iterations_ = std::max(1, max_iterations_);
   convergence_tol_ = std::max(1e-8, convergence_tol_);
 
+  debug_input_pub_ = node->create_publisher<nav_msgs::msg::Path>("/debug/se2_hybrid/input_path", 10);
+  debug_output_pub_ = node->create_publisher<nav_msgs::msg::Path>("/debug/se2_hybrid/output_path", 10);
+
   RCLCPP_INFO(logger_, "Configured %s smoother plugin", name_.c_str());
 }
 
 void SE2HybridSmoother::cleanup()
 {
+  debug_input_pub_.reset();
+  debug_output_pub_.reset();
   RCLCPP_INFO(logger_, "Cleanup %s smoother plugin", name_.c_str());
 }
 
 void SE2HybridSmoother::activate()
 {
+  if (debug_input_pub_) {
+    debug_input_pub_->on_activate();
+  }
+  if (debug_output_pub_) {
+    debug_output_pub_->on_activate();
+  }
   RCLCPP_INFO(logger_, "Activate %s smoother plugin", name_.c_str());
 }
 
 void SE2HybridSmoother::deactivate()
 {
+  if (debug_input_pub_) {
+    debug_input_pub_->on_deactivate();
+  }
+  if (debug_output_pub_) {
+    debug_output_pub_->on_deactivate();
+  }
   RCLCPP_INFO(logger_, "Deactivate %s smoother plugin", name_.c_str());
 }
 
@@ -161,8 +187,7 @@ nav_msgs::msg::Path SE2HybridSmoother::resamplePath(const nav_msgs::msg::Path & 
   for (size_t i = 1; i < path.poses.size(); ++i) {
     const auto & p0 = path.poses[i - 1].pose.position;
     const auto & p1 = path.poses[i].pose.position;
-    const double seg = std::hypot(p1.x - p0.x, p1.y - p0.y);
-    cumdist[i] = cumdist[i - 1] + seg;
+    cumdist[i] = cumdist[i - 1] + std::hypot(p1.x - p0.x, p1.y - p0.y);
   }
 
   const double total = cumdist.back();
@@ -171,15 +196,15 @@ nav_msgs::msg::Path SE2HybridSmoother::resamplePath(const nav_msgs::msg::Path & 
     return out;
   }
 
-  out.poses.clear();
   out.poses.push_back(path.poses.front());
 
   for (double s = step; s < total; s += step) {
-    auto it = std::lower_bound(cumdist.begin(), cumdist.end(), s);
+    const auto it = std::lower_bound(cumdist.begin(), cumdist.end(), s);
     if (it == cumdist.end()) {
       break;
     }
-    size_t idx = static_cast<size_t>(std::distance(cumdist.begin(), it));
+
+    const size_t idx = static_cast<size_t>(std::distance(cumdist.begin(), it));
     if (idx == 0) {
       continue;
     }
@@ -197,7 +222,8 @@ nav_msgs::msg::Path SE2HybridSmoother::resamplePath(const nav_msgs::msg::Path & 
     pose.pose.position.y = p0.y + ratio * (p1.y - p0.y);
     pose.pose.position.z = p0.z + ratio * (p1.z - p0.z);
 
-    tf2::Quaternion q0, q1;
+    tf2::Quaternion q0;
+    tf2::Quaternion q1;
     tf2::fromMsg(path.poses[idx - 1].pose.orientation, q0);
     tf2::fromMsg(path.poses[idx].pose.orientation, q1);
     tf2::Quaternion q = q0.slerp(q1, ratio);
@@ -214,30 +240,30 @@ nav_msgs::msg::Path SE2HybridSmoother::resamplePath(const nav_msgs::msg::Path & 
 std::vector<double> SE2HybridSmoother::computeTangentHeading(const nav_msgs::msg::Path & path) const
 {
   const size_t n = path.poses.size();
-  std::vector<double> theta(n, 0.0);
-  if (n == 0) {
-    return theta;
-  }
+  std::vector<double> heading(n, 0.0);
 
+  if (n == 0) {
+    return heading;
+  }
   if (n == 1) {
-    theta[0] = tf2::getYaw(path.poses[0].pose.orientation);
-    return theta;
+    heading[0] = tf2::getYaw(path.poses[0].pose.orientation);
+    return heading;
   }
 
   for (size_t i = 1; i + 1 < n; ++i) {
     const auto & pm = path.poses[i - 1].pose.position;
     const auto & pp = path.poses[i + 1].pose.position;
-    theta[i] = std::atan2(pp.y - pm.y, pp.x - pm.x);
+    heading[i] = std::atan2(pp.y - pm.y, pp.x - pm.x);
   }
 
-  theta[0] = std::atan2(
+  heading[0] = std::atan2(
     path.poses[1].pose.position.y - path.poses[0].pose.position.y,
     path.poses[1].pose.position.x - path.poses[0].pose.position.x);
-  theta[n - 1] = std::atan2(
+  heading[n - 1] = std::atan2(
     path.poses[n - 1].pose.position.y - path.poses[n - 2].pose.position.y,
     path.poses[n - 1].pose.position.x - path.poses[n - 2].pose.position.x);
 
-  return unwrapAngles(theta);
+  return unwrapAngles(heading);
 }
 
 std::vector<double> SE2HybridSmoother::computeCurvature(
@@ -246,6 +272,7 @@ std::vector<double> SE2HybridSmoother::computeCurvature(
 {
   const size_t n = path.poses.size();
   std::vector<double> kappa(n, 0.0);
+
   if (n < 2 || unwrapped_heading.size() != n) {
     return kappa;
   }
@@ -258,6 +285,7 @@ std::vector<double> SE2HybridSmoother::computeCurvature(
       kappa[i] = (unwrapped_heading[i + 1] - unwrapped_heading[i]) / ds;
     }
   }
+
   kappa[n - 1] = kappa[n - 2];
   return kappa;
 }
@@ -267,25 +295,28 @@ std::vector<SE2HybridSmoother::IncrementSE2> SE2HybridSmoother::computeRelativeI
   const std::vector<double> & wrapped_heading) const
 {
   const size_t n = path.poses.size();
-  std::vector<IncrementSE2> incs;
+  std::vector<IncrementSE2> increments;
+
   if (n < 2 || wrapped_heading.size() != n) {
-    return incs;
+    return increments;
   }
 
-  incs.resize(n - 1);
+  increments.resize(n - 1);
   for (size_t i = 0; i + 1 < n; ++i) {
     const auto & p0 = path.poses[i].pose.position;
     const auto & p1 = path.poses[i + 1].pose.position;
     const double dx = p1.x - p0.x;
     const double dy = p1.y - p0.y;
+
     const double c = std::cos(wrapped_heading[i]);
     const double s = std::sin(wrapped_heading[i]);
 
-    incs[i].dx_local = c * dx + s * dy;
-    incs[i].dy_local = -s * dx + c * dy;
-    incs[i].dtheta = wrapAngle(wrapped_heading[i + 1] - wrapped_heading[i]);
+    increments[i].dx_local = c * dx + s * dy;
+    increments[i].dy_local = -s * dx + c * dy;
+    increments[i].dtheta = wrapAngle(wrapped_heading[i + 1] - wrapped_heading[i]);
   }
-  return incs;
+
+  return increments;
 }
 
 void SE2HybridSmoother::applyIncrementCorrection(
@@ -306,11 +337,9 @@ void SE2HybridSmoother::applyIncrementCorrection(
 
     const double c = std::cos(wrapped_heading[i]);
     const double s = std::sin(wrapped_heading[i]);
-    const double gx = c * ddx - s * ddy;
-    const double gy = s * ddx + c * ddy;
 
-    path.poses[i + 1].pose.position.x += alpha * gx;
-    path.poses[i + 1].pose.position.y += alpha * gy;
+    path.poses[i + 1].pose.position.x += alpha * (c * ddx - s * ddy);
+    path.poses[i + 1].pose.position.y += alpha * (s * ddx + c * ddy);
     wrapped_heading[i + 1] = wrapAngle(wrapped_heading[i + 1] + alpha * ddtheta);
   }
 }
@@ -334,8 +363,12 @@ bool SE2HybridSmoother::smooth(nav_msgs::msg::Path & path, const rclcpp::Duratio
     }
   }
 
-  const auto start = std::chrono::steady_clock::now();
-  const auto max_ns = std::chrono::nanoseconds(max_time.nanoseconds());
+  if (publish_debug_paths_ && debug_input_pub_ && debug_input_pub_->is_activated()) {
+    debug_input_pub_->publish(path);
+  }
+
+  const auto start_time = std::chrono::steady_clock::now();
+  const auto max_budget = std::chrono::nanoseconds(max_time.nanoseconds());
 
   nav_msgs::msg::Path resampled = resamplePath(path, resample_distance_);
   if (resampled.poses.size() < 3) {
@@ -353,31 +386,29 @@ bool SE2HybridSmoother::smooth(nav_msgs::msg::Path & path, const rclcpp::Duratio
   }
 
   for (int iter = 0; iter < max_iterations_; ++iter) {
-    if (std::chrono::steady_clock::now() - start > max_ns) {
-      RCLCPP_DEBUG(logger_, "SE2 smoothing reached time budget at iteration %d", iter);
+    if (std::chrono::steady_clock::now() - start_time > max_budget) {
       break;
     }
 
     double max_delta = 0.0;
 
-    // Step 3: conservative XY smoothing with strong data anchoring.
     for (size_t i = 1; i + 1 < resampled.poses.size(); ++i) {
       auto & p = resampled.poses[i].pose.position;
       const auto & p0 = anchor.poses[i].pose.position;
       const auto & pm = resampled.poses[i - 1].pose.position;
       const auto & pp = resampled.poses[i + 1].pose.position;
 
-      const double dx = w_data_pos_ * (p0.x - p.x) + w_xy_smooth_ * (pm.x + pp.x - 2.0 * p.x);
-      const double dy = w_data_pos_ * (p0.y - p.y) + w_xy_smooth_ * (pm.y + pp.y - 2.0 * p.y);
+      const double ux = w_data_pos_ * (p0.x - p.x) + w_xy_smooth_ * (pm.x + pp.x - 2.0 * p.x);
+      const double uy = w_data_pos_ * (p0.y - p.y) + w_xy_smooth_ * (pm.y + pp.y - 2.0 * p.y);
 
-      p.x += dx;
-      p.y += dy;
-      max_delta = std::max(max_delta, std::hypot(dx, dy));
+      p.x += ux;
+      p.y += uy;
+      max_delta = std::max(max_delta, std::hypot(ux, uy));
     }
 
-    // Step 4 + 5: tangent heading and heading smoothing.
-    std::vector<double> theta_tan = computeTangentHeading(resampled);
-    std::vector<double> heading_unwrapped = unwrapAngles(heading);
+    auto theta_tan = computeTangentHeading(resampled);
+    auto heading_unwrapped = unwrapAngles(heading);
+
     for (size_t i = 1; i + 1 < heading_unwrapped.size(); ++i) {
       const double d_tan = theta_tan[i] - heading_unwrapped[i];
       const double d_smooth = 0.5 * (heading_unwrapped[i - 1] + heading_unwrapped[i + 1]) - heading_unwrapped[i];
@@ -386,31 +417,33 @@ bool SE2HybridSmoother::smooth(nav_msgs::msg::Path & path, const rclcpp::Duratio
       max_delta = std::max(max_delta, std::abs(dtheta));
     }
 
-    // Step 6: local SE(2) increment correction (lightweight, local only).
     for (size_t i = 0; i < heading.size(); ++i) {
       heading[i] = wrapAngle(heading_unwrapped[i]);
     }
+
     auto inc = computeRelativeIncrementsSE2(resampled, heading);
     auto inc_smooth = inc;
+
     for (size_t i = 1; i + 1 < inc.size(); ++i) {
-      inc_smooth[i].dx_local = (1.0 - w_increment_smooth_) * inc[i].dx_local +
+      inc_smooth[i].dx_local =
+        (1.0 - w_increment_smooth_) * inc[i].dx_local +
         0.5 * w_increment_smooth_ * (inc[i - 1].dx_local + inc[i + 1].dx_local);
-      inc_smooth[i].dy_local = (1.0 - w_increment_smooth_) * inc[i].dy_local +
+      inc_smooth[i].dy_local =
+        (1.0 - w_increment_smooth_) * inc[i].dy_local +
         0.5 * w_increment_smooth_ * (inc[i - 1].dy_local + inc[i + 1].dy_local);
       inc_smooth[i].dtheta = wrapAngle(
         (1.0 - w_increment_smooth_) * inc[i].dtheta +
         0.5 * w_increment_smooth_ * (inc[i - 1].dtheta + inc[i + 1].dtheta));
     }
+
     applyIncrementCorrection(resampled, heading, inc, inc_smooth, 0.25);
 
-    // Step 7: mild curvature-variation regularization.
     heading_unwrapped = unwrapAngles(heading);
     auto kappa = computeCurvature(resampled, heading_unwrapped);
     for (size_t i = 1; i + 2 < kappa.size(); ++i) {
       const double dk_prev = kappa[i] - kappa[i - 1];
       const double dk_next = kappa[i + 1] - kappa[i];
-      const double dd = (dk_next - dk_prev);
-      heading_unwrapped[i + 1] -= w_curvature_var_ * dd * 0.01;
+      heading_unwrapped[i + 1] -= 0.01 * w_curvature_var_ * (dk_next - dk_prev);
     }
 
     if (preserve_start_orientation_) {
@@ -420,25 +453,26 @@ bool SE2HybridSmoother::smooth(nav_msgs::msg::Path & path, const rclcpp::Duratio
       heading_unwrapped.back() = tf2::getYaw(goal_pose.pose.orientation);
     }
 
-    for (size_t i = 0; i < heading.size(); ++i) {
+    for (size_t i = 0; i < resampled.poses.size(); ++i) {
       heading[i] = wrapAngle(heading_unwrapped[i]);
-      tf2::Quaternion q;
-      q.setRPY(0.0, 0.0, heading[i]);
-      q.normalize();
-      resampled.poses[i].pose.orientation = tf2::toMsg(q);
+      resampled.poses[i].pose.orientation = yawToQuaternion(heading[i]);
+      resampled.poses[i].header = resampled.header;
     }
 
-    // Step 8: preserve terminal positions.
     resampled.poses.front().pose.position = start_pose.pose.position;
     resampled.poses.back().pose.position = goal_pose.pose.position;
 
     if (max_delta < convergence_tol_) {
-      RCLCPP_DEBUG(logger_, "SE2 smoothing converged at iteration %d", iter);
       break;
     }
   }
 
   path = std::move(resampled);
+
+  if (publish_debug_paths_ && debug_output_pub_ && debug_output_pub_->is_activated()) {
+    debug_output_pub_->publish(path);
+  }
+
   return true;
 }
 

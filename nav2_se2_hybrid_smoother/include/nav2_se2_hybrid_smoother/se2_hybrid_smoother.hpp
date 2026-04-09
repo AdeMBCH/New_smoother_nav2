@@ -4,7 +4,6 @@
 #include <string>
 #include <vector>
 
-#include "geometry_msgs/msg/pose_stamped.hpp"
 #include "nav2_core/smoother.hpp"
 #include "nav_msgs/msg/path.hpp"
 #include "rclcpp/rclcpp.hpp"
@@ -63,6 +62,9 @@ private:
   rclcpp::Logger logger_{rclcpp::get_logger("SE2HybridSmoother")};
   std::string name_;
 
+  rclcpp_lifecycle::LifecyclePublisher<nav_msgs::msg::Path>::SharedPtr debug_input_pub_;
+  rclcpp_lifecycle::LifecyclePublisher<nav_msgs::msg::Path>::SharedPtr debug_output_pub_;
+
   double resample_distance_{0.05};
   int max_iterations_{30};
   double w_data_pos_{1.0};
@@ -73,6 +75,7 @@ private:
   double w_curvature_var_{0.05};
   bool preserve_start_orientation_{true};
   bool preserve_goal_orientation_{true};
+  bool publish_debug_paths_{true};
   double convergence_tol_{1e-4};
 };
 

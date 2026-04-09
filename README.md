@@ -1,73 +1,153 @@
-# nav2_se2_hybrid_smoother (ROS 2 Kilted prototype)
+# New_smoother_nav2
 
-Prototype minimal et propre d'un plugin **Nav2 Smoother Server** hybride:
+Prototype complet ROS 2 Kilted + Nav2 avec :
 
-- base de lissage **fortement ancrée en (x, y)**,
-- correction locale **SE(2)-aware** sur heading / incréments,
-- sans solveur lourd,
-- intégration TurtleBot3 + Nav2 pour test rapide.
+- plugin `Smoother Server` : `nav2_se2_hybrid_smoother::SE2HybridSmoother`
+- baselines `no_smoother` / `savitzky_golay`
+- bringup TurtleBot3 simulation
+- benchmark automatique multi-config avec CSV + plots
 
 ## Arborescence
 
 ```text
 New_smoother_nav2/
 ├── README.md
-└── nav2_se2_hybrid_smoother/
-    ├── CMakeLists.txt
+├── nav2_se2_hybrid_smoother/
+│   ├── CMakeLists.txt
+│   ├── package.xml
+│   ├── plugin.xml
+│   ├── include/nav2_se2_hybrid_smoother/se2_hybrid_smoother.hpp
+│   ├── src/se2_hybrid_smoother.cpp
+│   ├── config/
+│   │   ├── nav2_params_baseline_savgol.yaml
+│   │   ├── nav2_params_no_smoother.yaml
+│   │   └── nav2_params_se2_hybrid.yaml
+│   ├── bt/
+│   │   ├── nav_to_pose_no_smoothing.xml
+│   │   ├── nav_to_pose_with_savgol_smoothing.xml
+│   │   └── nav_to_pose_with_se2_smoothing.xml
+│   └── launch/
+│       ├── bringup_no_smoother_tb3.launch.py
+│       ├── bringup_savgol_tb3.launch.py
+│       └── bringup_se2_hybrid_tb3.launch.py
+└── nav2_se2_hybrid_benchmark/
     ├── package.xml
-    ├── plugin.xml
-    ├── include/nav2_se2_hybrid_smoother/se2_hybrid_smoother.hpp
-    ├── src/se2_hybrid_smoother.cpp
-    ├── config/nav2_params_se2_hybrid.yaml
-    ├── bt/nav_to_pose_with_se2_smoothing.xml
-    ├── launch/se2_hybrid_tb3_demo.launch.py
-    └── scripts/benchmark_paths.py
+    ├── setup.py
+    ├── setup.cfg
+    ├── resource/nav2_se2_hybrid_benchmark
+    ├── nav2_se2_hybrid_benchmark/run_benchmark.py
+    ├── config/goals_tb3_world.yaml
+    └── launch/benchmark_tb3.launch.py
 ```
+
+## Dépendances système (Ubuntu 24.04 / ROS 2 Kilted)
+
+```bash
+sudo apt update
+sudo apt install -y \
+  python3-colcon-common-extensions \
+  ros-kilted-navigation2 \
+  ros-kilted-nav2-bringup \
+  ros-kilted-nav2-simple-commander \
+  ros-kilted-nav2-minimal-tb4-sim \
+  ros-kilted-ros-gz \
+  python3-numpy python3-pandas python3-matplotlib python3-yaml
+```
+
+Si ton environnement n’a pas déjà la stack TurtleBot3, ajoute:
+
+```bash
+sudo apt install -y \
+  ros-kilted-turtlebot3 \
+  ros-kilted-turtlebot3-msgs \
+  ros-kilted-turtlebot3-navigation2 \
+  ros-kilted-turtlebot3-simulations
+```
+
+`nav2_bringup` + `nav2_minimal_tb4_sim` suffit souvent pour le demo launch inclus ici; les paquets TurtleBot3 ci-dessus sont recommandés pour éviter les manques de modèles/assets selon machines.
 
 ## Build
 
 ```bash
-cd ~/your_ws/src
-# copier ce repo dans src, ou symlink
-cd ~/your_ws
+cd ~/ws_nav2/src
+git clone <TON_REPO> New_smoother_nav2
+cd ~/ws_nav2
 source /opt/ros/kilted/setup.bash
-colcon build --symlink-install --packages-select nav2_se2_hybrid_smoother
+colcon build --symlink-install
 ```
 
-## Source
+## Source environnement
 
 ```bash
 source /opt/ros/kilted/setup.bash
-source ~/your_ws/install/setup.bash
-```
-
-## Lancer la simulation TurtleBot3 + Nav2 avec ce smoother
-
-```bash
+source ~/ws_nav2/install/setup.bash
 export TURTLEBOT3_MODEL=burger
-ros2 launch nav2_se2_hybrid_smoother se2_hybrid_tb3_demo.launch.py
 ```
 
-Le launch inclut `nav2_bringup/launch/tb3_simulation_launch.py` et passe:
-- le `params_file`: `config/nav2_params_se2_hybrid.yaml`
-- le BT XML: `bt/nav_to_pose_with_se2_smoothing.xml`
+## Lancer chaque configuration
 
-Note: ce launch **ne force plus** `turtlebot3_gazebo` pour le `world` (afin d'éviter l'erreur `package 'turtlebot3_gazebo' not found`). Le `world` par défaut est laissé à `tb3_simulation_launch.py`.
+### 1) SE2 Hybrid
 
-## Baseline / comparaison
+```bash
+ros2 launch nav2_se2_hybrid_smoother bringup_se2_hybrid_tb3.launch.py
+```
 
-### 1) Sans smoother
-Dans le BT, supprimer le noeud `SmoothPath` et passer `ComputePathToPose -> FollowPath` directement.
+### 2) Savitzky-Golay baseline
 
-### 2) Savitzky-Golay
-Dans le BT, garder `SmoothPath` mais utiliser `smoother_id="savitzky_golay"`.
+```bash
+ros2 launch nav2_se2_hybrid_smoother bringup_savgol_tb3.launch.py
+```
 
-### 3) SE2HybridSmoother
-Utiliser le BT fourni (id `se2_hybrid`).
+### 3) No smoother baseline
 
-## Paramètres exposés (YAML)
+```bash
+ros2 launch nav2_se2_hybrid_smoother bringup_no_smoother_tb3.launch.py
+```
 
-Sous `smoother_server.ros__parameters.se2_hybrid`:
+## Benchmark automatique (recommandé)
+
+Le script benchmark :
+
+- lance successivement chaque bringup,
+- exécute la même liste de goals,
+- récupère path brut + smooth + odom,
+- calcule les métriques,
+- exporte CSV + PNG.
+
+```bash
+source /opt/ros/kilted/setup.bash
+source ~/ws_nav2/install/setup.bash
+export TURTLEBOT3_MODEL=burger
+
+ros2 run nav2_se2_hybrid_benchmark run_benchmark \
+  --methods no_smoother savgol se2_hybrid \
+  --output-dir benchmark_results \
+  --startup-wait 25 \
+  --nav-timeout 180
+```
+
+Avec goals custom :
+
+```bash
+ros2 run nav2_se2_hybrid_benchmark run_benchmark \
+  --methods no_smoother savgol se2_hybrid \
+  --goals-file /chemin/vers/goals.yaml \
+  --output-dir benchmark_results_custom
+```
+
+## Fichiers de sortie benchmark
+
+Dans `benchmark_results/` :
+
+- `benchmark_raw.csv` (par run/goal)
+- `benchmark_summary.csv` (agrégé par méthode)
+- `metrics_barplots.png`
+- `xy_trajectories.png`
+- `paths/<method>/goal_*_{raw,smoothed,trajectory}.csv`
+
+## Paramètres plugin `se2_hybrid`
+
+Dans `nav2_params_se2_hybrid.yaml` :
 
 - `resample_distance`
 - `max_iterations`
@@ -79,67 +159,37 @@ Sous `smoother_server.ros__parameters.se2_hybrid`:
 - `w_curvature_var`
 - `preserve_start_orientation`
 - `preserve_goal_orientation`
+- `publish_debug_paths`
 - `convergence_tol`
 
-Valeurs par défaut incluses:
+Debug topics publiés par le plugin :
 
-```yaml
-resample_distance: 0.05
-max_iterations: 30
-w_data_pos: 1.0
-w_xy_smooth: 0.25
-w_heading_tangent: 0.4
-w_heading_smooth: 0.2
-w_increment_smooth: 0.15
-w_curvature_var: 0.05
-preserve_start_orientation: true
-preserve_goal_orientation: true
-convergence_tol: 1e-4
-```
+- `/debug/se2_hybrid/input_path`
+- `/debug/se2_hybrid/output_path`
 
-## Benchmark offline minimal
+## Métriques calculées
 
-Script: `scripts/benchmark_paths.py`
+### Path-level
 
-Entrées CSV attendues:
-- colonnes minimales: `x,y`
-- optionnelles: `theta`, `smoothing_ms`
+- `raw_path_length`
+- `smoothed_path_length`
+- `raw_mean_abs_curvature`
+- `smoothed_mean_abs_curvature`
+- `raw_mean_abs_curvature_variation`
+- `smoothed_mean_abs_curvature_variation`
+- `heading_error_raw_vs_smoothed`
+- `smoothing_time_ms`
 
-Exemple:
+### Nav-level
 
-```bash
-python3 nav2_se2_hybrid_smoother/scripts/benchmark_paths.py \
-  --raw raw.csv \
-  --variant none:none.csv \
-  --variant savgol:savgol.csv \
-  --variant se2_hybrid:se2_hybrid.csv \
-  --outdir benchmark_out
-```
+- `success`
+- `navigation_time_s`
+- `robot_distance_m`
+- `final_goal_error_m`
 
-Sorties:
-- `benchmark_out/metrics.csv`
-- `benchmark_out/paths.png`
+## Notes API Kilted à vérifier (courtes)
 
-Métriques:
-- longueur de chemin
-- variation moyenne de courbure
-- erreur moyenne de heading vs brut
-- temps de smoothing moyen (si `smoothing_ms` présent)
-
-## Compatibilité Kilted: points à vérifier
-
-1. **Signature exacte des paramètres de launch** dans `tb3_simulation_launch.py` (`bt_xml_file` peut varier selon révision Nav2).
-2. **Disponibilité plugin planner**:
-   - config par défaut: `SmacPlannerHybrid`
-   - fallback rapide: `SmacPlanner2D` si besoin.
-3. **Nom du paramètre BT Navigator**:
-   - `default_nav_to_pose_bt_xml` peut dépendre de version/révision.
-4. **Noeud BT `SmoothPath`**:
-   - ports XML peuvent légèrement varier selon Nav2 Kilted patch-level.
-
-## Limitations
-
-- Prototype orienté faisabilité, pas optimisation globale.
-- Correction SE(2) locale volontairement faible (pas reconstruction globale Lie complète).
-- Pas de collision checking interne au smoother.
-- Le benchmark est offline (CSV), pas encore un pipeline live automatique dans Nav2.
+1. Signature exacte de `BasicNavigator.smoothPath(...)` selon patch Nav2 Kilted.
+2. Noms d’arguments de `tb3_simulation_launch.py` (`bt_xml_file` / `headless`) selon révision.
+3. Plugin planner `nav2_smac_planner/SmacPlannerHybrid` dispo selon installation minimale.
+4. Si ton monde TB3 diffère, adapter `config/goals_tb3_world.yaml`.
