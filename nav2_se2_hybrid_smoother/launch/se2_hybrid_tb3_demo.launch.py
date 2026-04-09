@@ -12,7 +12,6 @@ def generate_launch_description():
     params_file = LaunchConfiguration('params_file')
     bt_xml_file = LaunchConfiguration('bt_xml_file')
     use_sim_time = LaunchConfiguration('use_sim_time')
-    world = LaunchConfiguration('world')
 
     return LaunchDescription([
         DeclareLaunchArgument(
@@ -24,13 +23,6 @@ def generate_launch_description():
             default_value=PathJoinSubstitution([pkg_share, 'bt', 'nav_to_pose_with_se2_smoothing.xml'])
         ),
         DeclareLaunchArgument('use_sim_time', default_value='True'),
-        DeclareLaunchArgument(
-            'world',
-            default_value=PathJoinSubstitution([
-                FindPackageShare('turtlebot3_gazebo'),
-                'worlds',
-                'turtlebot3_world.world'])
-        ),
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
                 PathJoinSubstitution([nav2_bringup_share, 'launch', 'tb3_simulation_launch.py'])
@@ -39,7 +31,6 @@ def generate_launch_description():
                 'params_file': params_file,
                 'bt_xml_file': bt_xml_file,
                 'use_sim_time': use_sim_time,
-                'world': world,
             }.items()
         )
     ])

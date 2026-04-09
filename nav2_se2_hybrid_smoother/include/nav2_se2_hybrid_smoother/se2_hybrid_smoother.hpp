@@ -24,8 +24,7 @@ public:
     std::string name,
     std::shared_ptr<tf2_ros::Buffer> tf,
     std::shared_ptr<nav2_costmap_2d::CostmapSubscriber> costmap_sub,
-    std::shared_ptr<nav2_costmap_2d::FootprintSubscriber> footprint_sub,
-    std::shared_ptr<nav2_costmap_2d::CostmapTopicCollisionChecker> collision_checker) override;
+    std::shared_ptr<nav2_costmap_2d::FootprintSubscriber> footprint_sub) override;
 
   void cleanup() override;
   void activate() override;

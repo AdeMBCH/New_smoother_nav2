@@ -14,6 +14,21 @@
 namespace nav2_se2_hybrid_smoother
 {
 
+namespace
+{
+template<typename ParameterT>
+void declareIfNotDeclared(
+  const std::shared_ptr<rclcpp_lifecycle::LifecycleNode> & node,
+  const std::string & parameter_name,
+  const ParameterT & default_value)
+{
+  if (!node->has_parameter(parameter_name)) {
+    node->declare_parameter(parameter_name, default_value);
+  }
+}
+}  // namespace
+
+
 double SE2HybridSmoother::wrapAngle(double a)
 {
   while (a > M_PI) {
@@ -74,8 +89,7 @@ void SE2HybridSmoother::configure(
   std::string name,
   std::shared_ptr<tf2_ros::Buffer>,
   std::shared_ptr<nav2_costmap_2d::CostmapSubscriber>,
-  std::shared_ptr<nav2_costmap_2d::FootprintSubscriber>,
-  std::shared_ptr<nav2_costmap_2d::CostmapTopicCollisionChecker>)
+  std::shared_ptr<nav2_costmap_2d::FootprintSubscriber>)
 {
   parent_ = parent;
   name_ = std::move(name);
@@ -87,19 +101,17 @@ void SE2HybridSmoother::configure(
 
   logger_ = node->get_logger();
 
-  nav2_util::declare_parameter_if_not_declared(node, name_ + ".resample_distance", rclcpp::ParameterValue(0.05));
-  nav2_util::declare_parameter_if_not_declared(node, name_ + ".max_iterations", rclcpp::ParameterValue(30));
-  nav2_util::declare_parameter_if_not_declared(node, name_ + ".w_data_pos", rclcpp::ParameterValue(1.0));
-  nav2_util::declare_parameter_if_not_declared(node, name_ + ".w_xy_smooth", rclcpp::ParameterValue(0.25));
-  nav2_util::declare_parameter_if_not_declared(node, name_ + ".w_heading_tangent", rclcpp::ParameterValue(0.4));
-  nav2_util::declare_parameter_if_not_declared(node, name_ + ".w_heading_smooth", rclcpp::ParameterValue(0.2));
-  nav2_util::declare_parameter_if_not_declared(node, name_ + ".w_increment_smooth", rclcpp::ParameterValue(0.15));
-  nav2_util::declare_parameter_if_not_declared(node, name_ + ".w_curvature_var", rclcpp::ParameterValue(0.05));
-  nav2_util::declare_parameter_if_not_declared(
-    node, name_ + ".preserve_start_orientation", rclcpp::ParameterValue(true));
-  nav2_util::declare_parameter_if_not_declared(
-    node, name_ + ".preserve_goal_orientation", rclcpp::ParameterValue(true));
-  nav2_util::declare_parameter_if_not_declared(node, name_ + ".convergence_tol", rclcpp::ParameterValue(1e-4));
+  declareIfNotDeclared(node, name_ + ".resample_distance", 0.05);
+  declareIfNotDeclared(node, name_ + ".max_iterations", 30);
+  declareIfNotDeclared(node, name_ + ".w_data_pos", 1.0);
+  declareIfNotDeclared(node, name_ + ".w_xy_smooth", 0.25);
+  declareIfNotDeclared(node, name_ + ".w_heading_tangent", 0.4);
+  declareIfNotDeclared(node, name_ + ".w_heading_smooth", 0.2);
+  declareIfNotDeclared(node, name_ + ".w_increment_smooth", 0.15);
+  declareIfNotDeclared(node, name_ + ".w_curvature_var", 0.05);
+  declareIfNotDeclared(node, name_ + ".preserve_start_orientation", true);
+  declareIfNotDeclared(node, name_ + ".preserve_goal_orientation", true);
+  declareIfNotDeclared(node, name_ + ".convergence_tol", 1e-4);
 
   node->get_parameter(name_ + ".resample_distance", resample_distance_);
   node->get_parameter(name_ + ".max_iterations", max_iterations_);

@@ -52,6 +52,8 @@ Le launch inclut `nav2_bringup/launch/tb3_simulation_launch.py` et passe:
 - le `params_file`: `config/nav2_params_se2_hybrid.yaml`
 - le BT XML: `bt/nav_to_pose_with_se2_smoothing.xml`
 
+Note: ce launch **ne force plus** `turtlebot3_gazebo` pour le `world` (afin d'éviter l'erreur `package 'turtlebot3_gazebo' not found`). Le `world` par défaut est laissé à `tb3_simulation_launch.py`.
+
 ## Baseline / comparaison
 
 ### 1) Sans smoother
